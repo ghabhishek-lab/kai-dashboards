@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compute Tracking Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:20px}
+.container{max-width:900px;margin:0 auto}
+h1{font-size:1.4rem;margin-bottom:16px;color:#fff}
+.tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+.tab{padding:8px 16px;background:#111;border:1px solid #222;border-radius:6px;cursor:pointer;color:#888;font-size:.85rem}
+.tab.active{color:#fff;border-color:#555}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
+.card{background:#111;border:1px solid #222;border-radius:8px;padding:16px;text-align:center}
+.card .num{font-size:2rem;font-weight:700}
+.card .label{font-size:.75rem;color:#888;margin-top:4px}
+.green{color:#4ade80}.yellow{color:#facc15}.red{color:#f87171}.blue{color:#60a5fa}.orange{color:#fb923c}
+.section{background:#111;border:1px solid #222;border-radius:8px;padding:16px;margin-bottom:20px}
+.section h2{font-size:1rem;margin-bottom:12px;color:#ccc}
+.date-header{font-size:.85rem;color:#facc15;margin:12px 0 6px;padding-bottom:4px;border-bottom:1px solid #222}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th{text-align:left;color:#888;padding:6px 4px;border-bottom:1px solid #222}
+td{padding:6px 4px;border-bottom:1px solid #1a1a1a}
+.bar-row{margin-bottom:10px}
+.bar-label{font-size:.8rem;margin-bottom:3px;color:#aaa}
+.bar-track{height:18px;background:#1a1a1a;border-radius:4px;display:flex;overflow:hidden}
+.bar-prod{background:#4ade80;height:100%}
+.bar-waste{background:#f87171;height:100%}
+.bar-pct{font-size:.7rem;color:#888;margin-top:2px}
+.lesson-day{margin-bottom:12px}
+.lesson-day h3{font-size:.85rem;color:#facc15;margin-bottom:4px}
+.lesson-day li{font-size:.8rem;margin-left:16px;margin-bottom:2px;color:#ccc}
+.pattern{background:#2a1a1a;border:1px solid #f8717144;border-radius:6px;padding:10px;margin-top:12px}
+.pattern h3{font-size:.85rem;color:#f87171;margin-bottom:6px}
+.waste-rank{margin-bottom:6px;font-size:.8rem;color:#ccc}
+.waste-rank span{color:#f87171;font-weight:600}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>⚡ Compute Tracking Dashboard</h1>
+<div class="tabs">
+<div class="tab active" onclick="show('summary')">Summary</div>
+<div class="tab" onclick="show('spawns')">Spawns</div>
+<div class="tab" onclick="show('waste')">Waste</div>
+<div class="tab" onclick="show('lessons')">Lessons</div>
+</div>
+<div id="summary"></div>
+<div id="spawns" class="hidden"></div>
+<div id="waste" class="hidden"></div>
+<div id="lessons" class="hidden"></div>
+</div>
+<script>
+const sessions=[{date:"2026-02-20",day:"Friday",peakUsage:98,weeklyUsage:98,spawns:[{agent:"various",model:"opus",task:"5 spawns total",runtime:"various",status:"done",tokens:50000,note:"Heavy day, hit weekly limit by evening"}],wastedCompute:{reason:"config.get dumps 4K tokens, sessions_list polled 5x",estimatedWaste:"10%"},lessons:["config.get dumps 4K tokens — avoid","Don't poll sessions_list in loops"]},{date:"2026-02-23",day:"Monday",peakUsage:60,weeklyUsage:15,spawns:[{agent:"main",model:"sonnet",task:"8 main session calls",runtime:"various",status:"done",tokens:4000,note:"Light day, weekly reset at 3 PM"}],wastedCompute:{reason:"None",estimatedWaste:"0%"},lessons:["Friday over-spawning caused weekend blackout"]},{date:"2026-02-25",day:"Wednesday",peakUsage:88,weeklyUsage:54,spawns:[{agent:"idris",model:"sonnet",task:"nelson-research-3briefs",runtime:"54m",status:"timeout",tokens:0,note:"Task too large for one spawn"},{agent:"vault",model:"opus",task:"crypto-v1-wrong-data",runtime:"2m",status:"redo",tokens:14897,note:"Fed stale memory data instead of screenshots"},{agent:"idris",model:"sonnet",task:"nelson-brief3",runtime:"8m",status:"done",tokens:57200,note:"Split approach worked"},{agent:"idris",model:"sonnet",task:"nelson-brief1",runtime:"5m",status:"done",tokens:54839,note:"Split approach worked"},{agent:"idris",model:"sonnet",task:"nelson-brief2",runtime:"7m",status:"done",tokens:29000,note:"Split approach worked"},{agent:"vault",model:"opus",task:"crypto-v2-correct",runtime:"2m",status:"done",tokens:14897,note:"Correct data, missing analyst views"},{agent:"vault",model:"opus",task:"crypto-v3-final",runtime:"est 5m",status:"running",tokens:0,note:"All inputs verified"}],wastedCompute:{reason:"1x timeout (task too large), 1x wrong input data, 2x killed spawns",estimatedWaste:"20%"},lessons:["Split large tasks into 1 brief per spawn","Verify inputs before spawning","Write plans to files immediately","Budget compute at session start","When behind slow down"]}];
+
+const latest=sessions[sessions.length-1];
+const totalSpawns=latest.spawns.length;
+const successSpawns=latest.spawns.filter(s=>s.status==="done").length;
+const failedSpawns=totalSpawns-successSpawns;
+const totalTokens=latest.spawns.reduce((a,s)=>a+s.tokens,0);
+const successTokens=latest.spawns.filter(s=>s.status==="done").reduce((a,s)=>a+s.tokens,0);
+const efficiency=totalTokens?Math.round(successTokens/totalTokens*100):0;
+const wasteNum=parseInt(latest.wastedCompute.estimatedWaste)||0;
+const peakColor=latest.peakUsage<50?'green':latest.peakUsage<80?'yellow':'red';
+
+document.getElementById('summary').innerHTML=`
+<div class="cards">
+<div class="card"><div class="num ${peakColor}">${latest.peakUsage}%</div><div class="label">Peak Usage (${latest.date})</div></div>
+<div class="card"><div class="num ${latest.weeklyUsage<50?'green':latest.weeklyUsage<80?'yellow':'red'}">${latest.weeklyUsage}%</div><div class="label">Weekly Usage</div></div>
+<div class="card"><div class="num">${successSpawns}<span style="font-size:1rem;color:#888">/${failedSpawns}f</span></div><div class="label">Success / Failed</div></div>
+<div class="card"><div class="num ${efficiency>80?'green':efficiency>50?'yellow':'red'}">${efficiency}%</div><div class="label">Efficiency</div></div>
+<div class="card"><div class="num ${wasteNum<5?'green':wasteNum<15?'yellow':'red'}">${wasteNum}%</div><div class="label">Waste</div></div>
+</div>`;
+
+let spawnsHTML='<div class="section"><h2>Spawn Log</h2>';
+const statusColor={done:'green',timeout:'red',redo:'orange',running:'blue'};
+sessions.forEach(s=>{
+spawnsHTML+=`<div class="date-header">${s.date} (${s.day}) — Peak: ${s.peakUsage}%</div><table><tr><th>Agent</th><th>Model</th><th>Task</th><th>RT</th><th>Status</th><th>Tokens</th><th>Notes</th></tr>`;
+s.spawns.forEach(sp=>{
+spawnsHTML+=`<tr><td>${sp.agent}</td><td>${sp.model}</td><td>${sp.task}</td><td>${sp.runtime}</td><td class="${statusColor[sp.status]||''}">${sp.status}</td><td>${sp.tokens.toLocaleString()}</td><td style="color:#888">${sp.note}</td></tr>`;
+});
+spawnsHTML+=`</table>`;
+});
+spawnsHTML+=`</div>`;
+document.getElementById('spawns').innerHTML=spawnsHTML;
+
+// Waste
+let wasteHTML='<div class="section"><h2>Productive vs Wasted by Day</h2>';
+sessions.forEach(s=>{
+const w=parseInt(s.wastedCompute.estimatedWaste)||0;
+const p=100-w;
+wasteHTML+=`<div class="bar-row"><div class="bar-label">${s.date} (${s.day})</div><div class="bar-track"><div class="bar-prod" style="width:${p}%"></div><div class="bar-waste" style="width:${w}%"></div></div><div class="bar-pct">${p}% productive · ${w}% waste</div></div>`;
+});
+wasteHTML+=`</div><div class="section"><h2>Top Waste Reasons</h2>`;
+const reasons={};
+sessions.forEach(s=>{if(s.wastedCompute.reason!=="None")s.wastedCompute.reason.split(',').forEach(r=>{r=r.trim();reasons[r]=(reasons[r]||0)+1})});
+Object.entries(reasons).sort((a,b)=>b[1]-a[1]).forEach(([r,c])=>{
+wasteHTML+=`<div class="waste-rank"><span>${c}x</span> ${r}</div>`;
+});
+wasteHTML+=`</div>`;
+document.getElementById('waste').innerHTML=wasteHTML;
+
+// Lessons
+let lessonsHTML='<div class="section"><h2>Lessons by Day</h2>';
+sessions.forEach(s=>{
+lessonsHTML+=`<div class="lesson-day"><h3>${s.date} (${s.day})</h3><ul>${s.lessons.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+});
+// patterns
+const allLessons=sessions.flatMap(s=>s.lessons);
+const freq={};allLessons.forEach(l=>{freq[l]=(freq[l]||0)+1});
+const repeated=Object.entries(freq).filter(([,c])=>c>1);
+if(repeated.length){
+lessonsHTML+=`<div class="pattern"><h3>⚠️ Repeated Lessons (not learning!)</h3>`;
+repeated.forEach(([l,c])=>{lessonsHTML+=`<div class="waste-rank"><span>${c}x</span> ${l}</div>`});
+lessonsHTML+=`</div>`;
+}
+lessonsHTML+=`</div>`;
+document.getElementById('lessons').innerHTML=lessonsHTML;
+
+function show(id){
+['summary','spawns','waste','lessons'].forEach(s=>{
+document.getElementById(s).classList.toggle('hidden',s!==id);
+});
+document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.textContent.toLowerCase()===id));
+}
+</script>
+</body>
+</html>
